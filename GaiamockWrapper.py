@@ -352,7 +352,7 @@ def marginalize_grid1d(func, *grid_params, sample_count=1000,
         return np.array(grid1d)
 
 ### --- ###
-def marginalize_grid2d(func, grid_param, grid_param2, sample_count=1000, 
+def marginalize_grid2d(func, grid_param, *grid_params2, sample_count=1000, 
                             df=None, marginalize_angles=False, marginalize_pm=False, marginalize_position=False,
                             catalogue_path=None, multiple_df=False, return_params=False, verbose=True,
                             **kwargs):
@@ -377,19 +377,30 @@ def marginalize_grid2d(func, grid_param, grid_param2, sample_count=1000,
     param_name = grid_param[0]
     param_grid = grid_param[1]
     
-    param_name2 = grid_param2[0]
-    param_grid2 = grid_param2[1]
+    param_names2 = []
+    param_grids2 = []
+    for param in grid_params2:
+        param_names2.append(param[0])
+        param_grids2.append(param[1])
     
-    grid2d = np.zeros((len(param_grid), len(param_grid2), sample_count))
+    parameter_count = len(param_grids2[0])
+    
+    grid2d = np.zeros((len(param_grid), parameter_count, sample_count))
     
     pbar = None
     if verbose:
         pbar = tqdm(total=np.prod(grid2d.shape))
     for i, param_val in enumerate(param_grid):
         marginalized_param_grid.append([])
-        for j, param_val2 in enumerate(param_grid2):
+        for j in range(parameter_count):
             kwargs[param_name] = param_val # add grid sampled parameter to kwargs to pass to ruwe calculating function
-            kwargs[param_name2] = param_val2
+            for k, pname in enumerate(param_names2):
+                if isinstance(param_grids2[k], list):
+                    kwargs[pname] = param_grids2[k][j]
+                elif len(param_grids2[k].shape) == 1:
+                    kwargs[pname] = param_grids2[k][j]
+                else:
+                    kwargs[pname] = param_grids2[k][i,j]
             tempdf = df
             if multiple_df:
                 tempdf = df[i,j]
@@ -403,7 +414,6 @@ def marginalize_grid2d(func, grid_param, grid_param2, sample_count=1000,
                 calculated_values = results[0]
                 marginalized_param_grid[i].append(results[1])
             grid2d[i,j] = calculated_values
-                
                 
     if return_params:
         return np.array(grid2d), np.array(marginalized_param_grid)
@@ -445,14 +455,14 @@ def marginalize_ruwe_grid1d(*grid_params, single_star=False, use_a0=False, **kwa
     return marginalize_grid1d(func, *grid_params, **kwargs)
 
 ### --- ###
-def marginalize_ruwe_grid2d(grid_param, grid_param2, single_star=False, use_a0=False, **kwargs):
+def marginalize_ruwe_grid2d(grid_param, *grid_params2, single_star=False, use_a0=False, **kwargs):
     func = calculate_ruwe
     if single_star:
         func = calculate_ruwe_ss
     if use_a0:
         func = calculate_ruwe_a0
         
-    return marginalize_grid2d(func, grid_param, grid_param2, **kwargs)
+    return marginalize_grid2d(func, grid_param, *grid_params2, **kwargs)
 
 ### --- ASTROMETRIC SOLUTIONS --- ###
 ''' These simply marginalize using determine_if_astrometric_solution()
@@ -465,15 +475,53 @@ def search_for_solutions(use_a0=False, **kwargs):
     return marginalize(func, **kwargs)
 
 ### --- ###
-def search_for_solutions_grid1d(grid_param, use_a0=False, **kwargs):
+def search_for_solutions_grid1d(*grid_params, use_a0=False, **kwargs):
     func = determine_if_astrometric_solution
     if use_a0:
         func = determine_if_astrometric_solution_a0
-    return marginalize_grid1d(func, grid_param, **kwargs)
+    return marginalize_grid1d(func, *grid_params, **kwargs)
 
 ### --- ###
-def search_for_solutions_grid2d(grid_param, grid_param2, use_a0=False, **kwargs):
+def search_for_solutions_grid2d(grid_param, *grid_params2, use_a0=False, **kwargs):
     func = determine_if_astrometric_solution
     if use_a0:
         func = determine_if_astrometric_solution_a0
-    return marginalize_grid2d(func, grid_param, grid_param2, **kwargs)
+    return marginalize_grid2d(func, grid_param, *grid_params2, **kwargs)
+
+### --------------------- ###
+### --- CUBE CREATION --- ###
+### --------------------- ###
+
+### --- ###
+def convert_to_probability(multiarr, bincount=100, trim=95):
+    ''' Converts a multi dimensional array of calculated values into a multi dimensional array with probability densities
+    Notably, probability densities will need to be re-multiplied by bin size to reobtain normalization
+    
+    Also of note, this is a general function but it's intended for the log10 of a RUWE distribution
+    '''
+
+    set_bins = np.linspace(np.min(multiarr), np.percentile(multiarr, trim), bincount) #cutoff top 100-trim% of values to not get those crazy outliers
+    bin_sizes = 10**set_bins[1:] - 10**set_bins[:-1] # in linear bin size
+    
+    probability_marr = np.zeros((multiarr.shape[0], multiarr.shape[1], bincount-1))
+    for i in range(multiarr.shape[0]):
+        for j in range(multiarr.shape[1]):
+            data = multiarr[i,j,]
+            histograms = np.histogram(data, bins=set_bins)[0]
+            probabilities = histograms/len(data)
+            probability_marr[i][j] = probabilities / bin_sizes
+    
+    return probability_marr, set_bins
+
+### --- ###
+def create_cube(grid_param, *grid_params2, sample_count=1000, bincount=None, trim=95, return_bins=False, **kwargs):
+    ruwes = marginalize_ruwe_grid2d(grid_param, *grid_params2, sample_count=sample_count, **kwargs)
+    
+    if bincount is None:
+        bincount = sample_count // 5
+    probabilities, set_bins = convert_to_probability(np.log10(ruwes), bincount=bincount, trim=trim)
+    
+    if return_bins:
+        return probabilities, set_bins
+    else:
+        return probabilities
