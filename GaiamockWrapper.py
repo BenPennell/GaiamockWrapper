@@ -2,6 +2,7 @@ import numpy as np
 import gaiamock.gaiamock as gaiamock
 import pickle
 import numbers
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 try:
     # for Jupyter
@@ -192,7 +193,7 @@ def setup_marginalize(kwargs, marginalize_angles=False, marginalize_pm=False, ma
     return static_params, marg_funcs, catalogue
 
 ### --- ###
-def generate_marginalized_values(marg_funcs, df=None, catalogue=None):
+def generate_marginalized_values(marg_funcs, df=None, catalogue=None, count=1):
     '''
         takes all the marginalization functions and samples
         values from them. It a catalogue is provided, the 
@@ -205,33 +206,40 @@ def generate_marginalized_values(marg_funcs, df=None, catalogue=None):
             marg_vals {parameter_name: float}
         
     '''
-    marg_vals = dict()
-    for arg in marg_funcs.keys():
-        if catalogue is not None:
-            catdx = np.random.randint(len(catalogue)) # we want the same entry to be taken each time
-        if isinstance(marg_funcs[arg], str): 
-            temparg = arg
-            if arg == "ecc":
-                temparg = "eccentricity"
-            if arg == "Tp":
-                temparg = "t_periastron"
-            if arg == "inc":
-                temparg = "inclination"
-            if arg == "w":
-                temparg = "arg_periastron"  
-            if arg == "q":
-                temparg = "mass_ratio"  
-                
-            if marg_funcs[arg] == "catalogue":
-                marg_vals[arg] = catalogue[catdx][temparg]
-            if marg_funcs[arg] == "df":
-                marg_vals[arg] = df[temparg]
-        else:
-            marg_vals[arg] = marg_funcs[arg]()
-    return marg_vals
+    marg_vals = []
+    for i in range(count):
+        marg_vals_dict = dict()
+        for arg in marg_funcs.keys():
+            if catalogue is not None:
+                catdx = np.random.randint(len(catalogue)) # we want the same entry to be taken each time
+            if isinstance(marg_funcs[arg], str): 
+                temparg = arg
+                if arg == "ecc":
+                    temparg = "eccentricity"
+                if arg == "Tp":
+                    temparg = "t_periastron"
+                if arg == "inc":
+                    temparg = "inclination"
+                if arg == "w":
+                    temparg = "arg_periastron"  
+                if arg == "q":
+                    temparg = "mass_ratio"  
+                    
+                if marg_funcs[arg] == "catalogue":
+                    marg_vals_dict[arg] = catalogue[catdx][temparg]
+                if marg_funcs[arg] == "df":
+                    marg_vals_dict[arg] = df[temparg]
+            else:
+                marg_vals_dict[arg] = marg_funcs[arg]()
+        marg_vals.append(marg_vals_dict)
     
+    if count == 1:
+        return marg_vals[0]
+    else:
+        return marg_vals
+
 ### --- ###
-def marginalize(func, sample_count=1000, 
+def marginalize(func, sample_count=100, set_parameters=None,
                 df=None, marginalize_angles=False, marginalize_pm=False, marginalize_position=False,
                 catalogue_path=None, return_params=False, pbar=None, verbose=True,
                 **kwargs):
@@ -280,13 +288,14 @@ def marginalize(func, sample_count=1000,
     if pbar is None and verbose:
         pbar = tqdm(total=sample_count)
         
-    marginalized_set = []
+    marginalized_set = generate_marginalized_values(marg_funcs, df=df, catalogue=catalogue, count=sample_count)
     outarr = np.zeros(sample_count)
     for i in range(sample_count):
         # sample marginalized parameters from provided functions in *args
-        marg_vals = generate_marginalized_values(marg_funcs, df=df, catalogue=catalogue)
-        if return_params:
-            marginalized_set.append([marg_vals[key] for key in marg_vals.keys()])
+        if set_parameters is not None:
+            marg_vals = set_parameters[i]
+        else:
+            marg_vals = marginalized_set[i]
         
         outarr[i] = func(df=df, **marg_vals, **static_params)
         if verbose:
@@ -297,62 +306,95 @@ def marginalize(func, sample_count=1000,
     else:
         return outarr
     
-    ### --- ###
-def marginalize_grid1d(func, *grid_params, sample_count=1000, 
-                        df=None, marginalize_angles=False, marginalize_pm=False, marginalize_position=False,
-                        catalogue_path=None, multiple_df=False, return_params=False, verbose=True,
-                        **kwargs):
+### --- ###
+def _marginalize_worker(i, param_names, param_grids, kwargs, func, sample_count, df,
+                        multiple_df, marginalize_angles, marginalize_pm, marginalize_position,
+                        catalogue_path, return_params, seed):
+    '''
+        this is just a wrapper for marginalize() used in marginalize_grid1d() to parallelise
+    '''
+    
+    np.random.seed(seed) # need to give a random seed, otherwise the same random numbers are generated for each worker
+    for j, param_name in enumerate(param_names):
+        kwargs[param_name] = param_grids[j][i]
+
+    tempdf = df # if supplying dataframes for each marginalize() call
+    if multiple_df:
+        tempdf = df[i]
+
+    results = marginalize(
+        func, sample_count=sample_count, df=tempdf,
+        marginalize_angles=marginalize_angles,
+        marginalize_pm=marginalize_pm,
+        marginalize_position=marginalize_position,
+        catalogue_path=catalogue_path,
+        return_params=return_params,
+        pbar=None,
+        verbose=False,
+        **kwargs
+    )
+
+    if return_params:
+        return i, results[0], results[1]
+    else:
+        return i, results
+
+### --- ###
+def marginalize_grid1d(func, *grid_params, sample_count=100,
+                       df=None, marginalize_angles=False, marginalize_pm=False,
+                       marginalize_position=False, catalogue_path=None, multiple_df=False,
+                       return_params=False, verbose=True, pbar=None, **kwargs):
+
     '''
         call marginalize() for different values of a particular parameter provided in grid_param
         
         inputs:
             grid_param (string, list): name of the parameter and list of values it takes on
+                you can pass any number of parameters here, and it will iterate through them
+                all in the same sequence
             multiple_df: if set to True, you can pass multiple rows into df and have each
                 marginalization run use the corresponding row
             
             The rest of the inputs can be read about in the docstring for marginalize()
     '''
-    marginalized_param_grid = []
     
-    param_names = []
-    param_grids = []
-    
-    for param in grid_params:
-        param_names.append(param[0])
-        param_grids.append(param[1])
-    
+    param_names = [param[0] for param in grid_params]
+    param_grids = [param[1] for param in grid_params]
     parameter_count = len(param_grids[0])
     
-    grid1d = []
-    
-    pbar = None
-    if verbose:
-        pbar = tqdm(total=sample_count*parameter_count)
-    for i in range(parameter_count):
-        for j, param_name in enumerate(param_names):
-            kwargs[param_name] = param_grids[j][i] # add grid sampled parameters to kwargs to pass to ruwe calculating function
-        
-        tempdf = df
-        if multiple_df:
-            tempdf = df[i]
-        results = marginalize(func, sample_count=sample_count, 
-                                        df=tempdf, marginalize_angles=marginalize_angles, marginalize_pm=marginalize_pm, marginalize_position=marginalize_position,
-                                        catalogue_path=catalogue_path, return_params=return_params, pbar=pbar, verbose=verbose,
-                                        **kwargs)
-              
-        calculated_values = results
-        if return_params:
-            calculated_values = results[0]
-            marginalized_param_grid.append(results[1])
-        grid1d.append(calculated_values)
-    
+    results_buffer = [None] * parameter_count
+
+    if pbar is None and verbose:
+        pbar = tqdm(total=parameter_count)
+
+    with ProcessPoolExecutor() as executor:
+        futures = [
+            executor.submit(
+                _marginalize_worker, i, param_names, param_grids, kwargs.copy(), func,
+                sample_count, df, multiple_df, marginalize_angles,
+                marginalize_pm, marginalize_position, catalogue_path,
+                return_params, np.random.randint(10000)
+            )
+            for i in range(parameter_count)
+        ]
+
+        for future in futures:
+            i, *result_parts = future.result()
+            if return_params:
+                results_buffer[i] = (result_parts[0], result_parts[1])
+            else:
+                results_buffer[i] = result_parts[0]
+            if verbose:
+                pbar.update(1)
+
     if return_params:
+        grid1d, marginalized_param_grid = zip(*results_buffer)
         return np.array(grid1d), np.array(marginalized_param_grid)
     else:
-        return np.array(grid1d)
+        return np.array(results_buffer)
 
 ### --- ###
-def marginalize_grid2d(func, grid_param, *grid_params2, sample_count=1000, 
+def marginalize_grid2d(func, grid_param, *grid_params2, sample_count=100, 
                             df=None, marginalize_angles=False, marginalize_pm=False, marginalize_position=False,
                             catalogue_path=None, multiple_df=False, return_params=False, verbose=True,
                             **kwargs):
@@ -363,6 +405,7 @@ def marginalize_grid2d(func, grid_param, *grid_params2, sample_count=1000,
         inputs:
             grid_param (string, list): name of first parameter and list of values it takes on
             grid_param2 (string, list): name of second parameter and list of values it takes on
+                you can provide any number of parameters here to be iterated through together
             multiple_df: if set to True, pass in two dimensional array of df rows to have a particular
                 row called for each marginalization call
             
@@ -376,44 +419,30 @@ def marginalize_grid2d(func, grid_param, *grid_params2, sample_count=1000,
     
     param_name = grid_param[0]
     param_grid = grid_param[1]
-    
-    param_names2 = []
-    param_grids2 = []
-    for param in grid_params2:
-        param_names2.append(param[0])
-        param_grids2.append(param[1])
-    
-    parameter_count = len(param_grids2[0])
-    
-    grid2d = np.zeros((len(param_grid), parameter_count, sample_count))
+
+    grid2d = np.zeros((len(param_grid), len(grid_params2[0][1]), sample_count))
     
     pbar = None
     if verbose:
-        pbar = tqdm(total=np.prod(grid2d.shape))
+        pbar = tqdm(total=np.prod(grid2d.shape[:-1]))
     for i, param_val in enumerate(param_grid):
         marginalized_param_grid.append([])
-        for j in range(parameter_count):
-            kwargs[param_name] = param_val # add grid sampled parameter to kwargs to pass to ruwe calculating function
-            for k, pname in enumerate(param_names2):
-                if isinstance(param_grids2[k], list):
-                    kwargs[pname] = param_grids2[k][j]
-                elif len(param_grids2[k].shape) == 1:
-                    kwargs[pname] = param_grids2[k][j]
-                else:
-                    kwargs[pname] = param_grids2[k][i,j]
-            tempdf = df
-            if multiple_df:
-                tempdf = df[i,j]
-            results = marginalize(func, sample_count=sample_count, 
-                                            df=tempdf, marginalize_angles=marginalize_angles, marginalize_pm=marginalize_pm, marginalize_position=marginalize_position,
-                                            catalogue_path=catalogue_path, return_params=return_params,
-                                            pbar=pbar, verbose = verbose,
-                                            **kwargs)
-            calculated_values = results
-            if return_params:
-                calculated_values = results[0]
-                marginalized_param_grid[i].append(results[1])
-            grid2d[i,j] = calculated_values
+        kwargs[param_name] = param_val
+        
+        tempdf = df
+        if multiple_df:
+            tempdf = df[i]
+                
+        results = marginalize_grid1d(func, *grid_params2, sample_count=sample_count, 
+                                        df=tempdf, marginalize_angles=marginalize_angles, marginalize_pm=marginalize_pm, marginalize_position=marginalize_position,
+                                        catalogue_path=catalogue_path, return_params=return_params,
+                                        pbar=pbar, verbose = verbose,
+                                        **kwargs)
+        calculated_values = results
+        if return_params:
+            calculated_values = results[0]
+            marginalized_param_grid[i].append(results[1])
+        grid2d[i] = calculated_values
                 
     if return_params:
         return np.array(grid2d), np.array(marginalized_param_grid)
@@ -427,12 +456,18 @@ def marginalize_grid2d(func, grid_param, *grid_params2, sample_count=1000,
 ### ----------------- ###
 
 ### --- RUWE --- ###
-''' This one has an additional parameter
+''' 
     single_star (boolean): defaults to False
     This tells the program if you want to use
     Gaiamock on single stars or binaries
     by switching between calculate_ruwe()
     and calculate_ruwe_ss()
+    
+    use_a0 (boolean): defaults to False
+    This tells the program if instead of using
+    M1,q you want to use a0 for calling gaiamock.
+    Just switches to using calcualte_ruwe_a0()
+    if set to True
 '''
 ### --- ###
 def marginalize_ruwe(single_star=False, use_a0=False, **kwargs):
@@ -451,7 +486,7 @@ def marginalize_ruwe_grid1d(*grid_params, single_star=False, use_a0=False, **kwa
         func = calculate_ruwe_ss
     if use_a0:
         func = calculate_ruwe_a0
-        
+    
     return marginalize_grid1d(func, *grid_params, **kwargs)
 
 ### --- ###
@@ -461,7 +496,7 @@ def marginalize_ruwe_grid2d(grid_param, *grid_params2, single_star=False, use_a0
         func = calculate_ruwe_ss
     if use_a0:
         func = calculate_ruwe_a0
-        
+    
     return marginalize_grid2d(func, grid_param, *grid_params2, **kwargs)
 
 ### --- ASTROMETRIC SOLUTIONS --- ###
@@ -514,7 +549,13 @@ def convert_to_probability(multiarr, bincount=100, trim=95):
     return probability_marr, set_bins
 
 ### --- ###
-def create_cube(grid_param, *grid_params2, sample_count=1000, bincount=None, trim=95, return_bins=False, **kwargs):
+def create_cube(grid_param, *grid_params2, sample_count=100, bincount=None, trim=95, return_bins=False, **kwargs):
+    '''
+        calls marginalize_ruwe_grid2d(), works exactly the same as that function
+        but then also converts the RUWE samples to a probability distribution
+        
+        reccomended to set return_bins=True, since the bins will be important for plotting
+    '''
     ruwes = marginalize_ruwe_grid2d(grid_param, *grid_params2, sample_count=sample_count, **kwargs)
     
     if bincount is None:
