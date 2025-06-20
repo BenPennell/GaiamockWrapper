@@ -19,4 +19,6 @@ helpful (hopefully) notebooks:
 
 `mcmcexamples.ipynb` has an example for using mcmc to use `GaiamockWrapper.py` repeatedly to constrain parameters for single objects
 
+`solutioncountexample.ipynb` has an example for using the code to determine the expected count of each solution type for a catalogue of objects
+
 documentation is not at all complete. I'll answer questions and add features as requested.

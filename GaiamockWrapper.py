@@ -37,6 +37,9 @@ def random_inc():
 def random_Tp():
     return np.random.rand()-0.5 # generally you get Tp in (-0.5,0.5)*period
 
+def sample_from_normal(mu, sig):
+    return np.random.normal(loc=mu, scale=sig)
+
 def sample_perfect(func, boundary, count, *func_params, resolution=1000):
     vals = np.linspace(*boundary, resolution)
     p_vals = func(vals, *func_params)
@@ -320,6 +323,7 @@ def setup_marginalize(kwargs, marginalize_angles=False, marginalize_pm=False, ma
         
     # split into marginalized and un-marginalized parameters
     marg_funcs = dict()
+    marg_func_params = dict()
     static_params = dict()
     
     # set default angle distributions
@@ -349,13 +353,16 @@ def setup_marginalize(kwargs, marginalize_angles=False, marginalize_pm=False, ma
             outkwarg = "period"
         if callable(kwargs[kwarg]):
             marg_funcs[outkwarg] = kwargs[kwarg]
+        elif isinstance(kwargs[kwarg], (list, tuple)):
+            marg_funcs[outkwarg] = kwargs[kwarg][0]
+            marg_func_params[outkwarg] = kwargs[kwarg][1]
         else:
             static_params[outkwarg] = kwargs[kwarg]
     
-    return static_params, marg_funcs
+    return static_params, marg_funcs, marg_func_params
 
 ### --- ###
-def generate_marginalized_values(marg_funcs, df=None, catalogue=None, noise=None, count=1):
+def generate_marginalized_values(marg_funcs, marg_funcs_params, df=None, catalogue=None, noise=None, count=1):
     '''
         takes all the marginalization functions and samples
         values from them. If a catalogue is provided, the 
@@ -394,7 +401,10 @@ def generate_marginalized_values(marg_funcs, df=None, catalogue=None, noise=None
                 if arg == "noise":
                     marg_vals_dict[arg] = sample_with_noise(*noise[arg])
             else:
-                marg_vals_dict[arg] = marg_funcs[arg]()
+                if arg in marg_funcs_params.keys():
+                    marg_vals_dict[arg] = marg_funcs[arg](*marg_funcs_params[arg])
+                else:
+                    marg_vals_dict[arg] = marg_funcs[arg]()
         marg_vals.append(marg_vals_dict)
     
     return marg_vals
@@ -443,14 +453,14 @@ def marginalize(func, sample_count=100, return_count=1, function_count=1, set_pa
     
     # set up all the settings and split **kwargs into the parameters
     # that are just new default values, and the ones we marginalize
-    static_params, marg_funcs = setup_marginalize(kwargs,
+    static_params, marg_funcs, marg_funcs_params = setup_marginalize(kwargs,
                                             marginalize_angles=marginalize_angles, marginalize_pm=marginalize_pm, marginalize_position=marginalize_position)
     
     # you can inherit a pbar, used if marginalizing over a grid of values in marginalize_grid1d()
     if pbar is None and verbose:
         pbar = tqdm(total=sample_count*function_count)
         
-    marginalized_set = generate_marginalized_values(marg_funcs, df=df, catalogue=catalogue, count=sample_count, noise=noise)
+    marginalized_set = generate_marginalized_values(marg_funcs, marg_funcs_params, df=df, catalogue=catalogue, count=sample_count, noise=noise)
     results = []
     for funcidx in range(function_count):
         working_function = func
