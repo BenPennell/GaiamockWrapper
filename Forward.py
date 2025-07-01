@@ -543,7 +543,7 @@ class Binary(Constrainer):
             self.parameters["parallax"] = df["parallax"]
     
     ### --- ###
-    def orbit_probability(self, mcmc_params, target_object, ruwe_sample_count=100, soltype_sample_count=100, bin_width=0.05, skip_soltype=True, cutoff=np.exp(-21), **kwargs):
+    def orbit_probability(self, mcmc_params, target_object, ruwe_sample_count=100, soltype_sample_count=100, bin_width=0.05, skip_soltype=True, skip_accel=True, cutoff=np.exp(-21), **kwargs):
         # make sure we're within the prior
         if not self.within_prior(mcmc_params):
             return -np.inf
@@ -564,7 +564,7 @@ class Binary(Constrainer):
                                     w=gw.random_angle, omega=gw.random_angle, **mcmc_params, **kwargs)      
         l_solution_type = len(np.where(solution_types == target_object["solution_type"])[0])/len(solution_types)
         
-        if target_object["solution_type"] not in [7,9]:
+        if target_object["solution_type"] not in [7,9] or skip_accel:
             return np.log(np.maximum(l_ruwe*l_solution_type, cutoff))
         
         arg = "Acceleration7"
@@ -580,10 +580,11 @@ class Binary(Constrainer):
     
     ### --- ###
     def constrain_parameters(self, step_count=30, nwalkers=10, variation=0.3,
-                             ruwe_sample_count=100, soltype_sample_count=100, bin_width=0.05, skip_soltype=True, cutoff=np.exp(-21)):
+                             ruwe_sample_count=100, soltype_sample_count=100, bin_width=0.05, skip_soltype=True, skip_accel=True, cutoff=np.exp(-21)):
         temp_kwargs = self.parameters
         temp_kwargs["cutoff"] = cutoff
         temp_kwargs["skip_soltype"] = skip_soltype
+        temp_kwargs["skip_accel"] = skip_accel
         temp_kwargs["ruwe_sample_count"] = ruwe_sample_count
         temp_kwargs["soltype_sample_count"] = soltype_sample_count
         temp_kwargs["bin_width"] = bin_width

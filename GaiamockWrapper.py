@@ -115,7 +115,8 @@ def check_ruwe_reduced(t_ast_yr, psi, plx_factor, ast_obs, ast_err):
     return ruwe
 
 ### --- ###
-def calculate_ruwe(t_ast_yr=None, psi=None, plx_factor=None, epoch_err_per_transit=None, df=None,m1=0.4,q=0.2,period=1e4,ecc=0,inc=0,Tp=0,omega=0,w=0,f=1e-2,phot_g_mean_mag=14,parallax=None,ra=None,dec=None,pmra=0,pmdec=0,return_astrometry=False,return_both=False):
+def calculate_ruwe(t_ast_yr=None, psi=None, plx_factor=None, epoch_err_per_transit=None, df=None,m1=0.4,q=0.2,period=1e4,ecc=0,inc=0,Tp=0,omega=0,w=0,f=1e-2,phot_g_mean_mag=14,parallax=None,ra=None,dec=None,pmra=0,pmdec=0,data_release='dr3',
+                   return_astrometry=False,return_both=False):
     if df is not None:
         if parallax is None:
             parallax = df["parallax"]
@@ -138,7 +139,7 @@ def calculate_ruwe(t_ast_yr=None, psi=None, plx_factor=None, epoch_err_per_trans
     else:
         astrometry = gaiamock.predict_astrometry_luminous_binary(ra = ra, dec = dec, parallax = parallax, 
                         pmra = pmra, pmdec = pmdec, m1 = m1, m2 = q*m1, period = period, Tp = Tp*period, ecc = ecc, 
-                        omega = omega, inc = inc, w = w, phot_g_mean_mag = phot_g_mean_mag, f = f, data_release = 'dr3',
+                        omega = omega, inc = inc, w = w, phot_g_mean_mag = phot_g_mean_mag, f = f, data_release = data_release,
                         c_funcs = c_funcs)
     if return_astrometry:
         return astrometry
@@ -147,7 +148,8 @@ def calculate_ruwe(t_ast_yr=None, psi=None, plx_factor=None, epoch_err_per_trans
     return check_ruwe_reduced(*astrometry)
 
 ### --- ###
-def calculate_ruwe_ss(df=None,phot_g_mean_mag=None,parallax=None,ra=None,dec=None,pmra=0,pmdec=0,return_astrometry=False,return_both=False):
+def calculate_ruwe_ss(df=None,phot_g_mean_mag=None,parallax=None,ra=None,dec=None,pmra=0,pmdec=0,
+                      return_astrometry=False,return_both=False,data_release="dr3"):
     if df is not None:
         if phot_g_mean_mag is None:
             phot_g_mean_mag = df["phot_g_mean_mag"]
@@ -158,7 +160,7 @@ def calculate_ruwe_ss(df=None,phot_g_mean_mag=None,parallax=None,ra=None,dec=Non
         if dec is None:
             dec = df["dec"]
     astrometry = gaiamock.predict_astrometry_single_source(ra = ra, dec = dec, parallax = parallax, 
-                        pmra = pmra, pmdec = pmdec, phot_g_mean_mag = phot_g_mean_mag, data_release = 'dr3',
+                        pmra = pmra, pmdec = pmdec, phot_g_mean_mag = phot_g_mean_mag, data_release = data_release,
                         c_funcs = c_funcs)
     if return_astrometry:
         return astrometry
@@ -168,7 +170,8 @@ def calculate_ruwe_ss(df=None,phot_g_mean_mag=None,parallax=None,ra=None,dec=Non
 
 ### --- ###
 def calculate_ruwe_a0(df=None,period=1e4,a0=1,phot_g_mean_mag=14,Tp=0,ecc=0,omega=0,inc=0,w=0,
-                      ra=None,dec=None,parallax=None,pmra=0,pmdec=0,return_astrometry=False,return_both=False):
+                      ra=None,dec=None,parallax=None,pmra=0,pmdec=0,
+                      return_astrometry=False,return_both=False,data_release="dr3"):
     if df is not None:
         if phot_g_mean_mag is None:
             phot_g_mean_mag = df["phot_g_mean_mag"]
@@ -182,7 +185,7 @@ def calculate_ruwe_a0(df=None,period=1e4,a0=1,phot_g_mean_mag=14,Tp=0,ecc=0,omeg
     astrometry = gaiamock.predict_astrometry_binary_in_terms_of_a0(
                             ra=ra,dec=dec,parallax=parallax,pmra=pmra,pmdec=pmdec,
                             period=period,Tp=Tp,ecc=ecc,omega=omega,inc=inc,w=w, 
-                            a0_mas=a0, phot_g_mean_mag=phot_g_mean_mag,data_release='dr3',c_funcs=c_funcs)
+                            a0_mas=a0, phot_g_mean_mag=phot_g_mean_mag,data_release=data_release,c_funcs=c_funcs)
     if return_astrometry:
         return astrometry
     if return_both:
@@ -190,7 +193,7 @@ def calculate_ruwe_a0(df=None,period=1e4,a0=1,phot_g_mean_mag=14,Tp=0,ecc=0,omeg
     return check_ruwe_reduced(*astrometry)
     
 ### --- ###
-def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, ruwe_min=1.4, orbital_solution_prange=(1.5,3.5), skip_ruwe=False, skip_full=False):
+def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, ruwe_min=1.4, skip_ruwe=False, skip_full=False):
     '''
         simplified version of fit_full_astrometric_cascade() in Gaiamock, 
         used only to ask what type of solution there is. 
