@@ -31,8 +31,8 @@ def sample_with_noise(value, scale):
 def random_angle():
     return np.random.rand()*2*np.pi
 
-def random_inc():
-    return np.random.rand()*0.5*np.pi
+def random_inc(): # flat in cos(i)
+    return np.acos(np.random.rand())
 
 def random_Tp():
     return np.random.rand()-0.5 # generally you get Tp in (-0.5,0.5)*period
