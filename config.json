@@ -1,0 +1,5 @@
+{
+    "gaiamock_path": "../BHPopulation/gaiamock",
+    "output_path": "./output",
+    "wrapperlitepath": "./utils"
+}

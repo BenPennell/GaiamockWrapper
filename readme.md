@@ -1,24 +1,16 @@
-# Ben's gaiamock wrapper and tools and such
+# Generating Mock Datasets
 
-Ben Pennell
+Ben Pennell, MPIA
 
---
+February 20th, 2026
 _____
 
-directory:
+Ignore everything in `./Legacy`, it's just here for completeness.
 
-`Forward.py` has an object-oriented approach for calculating likelihoods with astrometric signals for catalogues of objects or single objects
+With `create_synthetic_data()` in `SyntheticData.py` you can input an astropy table of objects and make a mock catalogue that matches its distributions of ra,dec,pmra,pmdec,parallax,magnitude, and mass. Then you can assign companions to it based on a binary fraction and some choices of the period, mass ratio, and eccentricity distributions.
 
-`GaiamockWrapper.py` is a wrapper for `gaiamock` that is streamlined to marginalise over parameters and rapidly calculate RUWE and types of orbital solutions
+`SyntheticData.py` makes use of my random utility functions in `./utils/utils.py`, and my wrapper for gaiamock in `./utils/GaiamockWrapperLite.py`. 
 
-helpful (hopefully) notebooks:
+The first step for setting this up is having `Gaiamock` somewhere on your machine, and putting its directory in `config.json` so the scripts can find it.
 
-`FastRuweExample.ipynb` briefly goes over how to calculate RUWE using `GaiamockWrapper.py` and the speedups I've used 
-
-`gwexamples.ipynb` has some examples for marginalisation using `GaiamockWrapper.py`
-
-`mcmcexamples.ipynb` has an example for using mcmc to use `GaiamockWrapper.py` repeatedly to constrain parameters for single objects
-
-`solutioncountexample.ipynb` has an example for using the code to determine the expected count of each solution type for a catalogue of objects
-
-documentation is not at all complete. I'll answer questions and add features as requested.
+`GenerateSyntheticDatasets.ipynb` is a notebook that shows how I interact with my script and make my synthetic datasets, changing the distributions and different parameters. It's not trivial but also not a nightmare to swap in different choices for period, mass ratios, and eccentricities. `SyntheticData.py` should hopefully be commented enough. The parallelisation is a bit terse, but just ignore that.
