@@ -159,7 +159,7 @@ def solve_binary(period, q, ecc, inc, w, omega, Tp,
 
 def create_synthetic_data(object_count, catalogue,
                         binary_fraction=None, binarity_model=None, mass_model=None, period_model=None, ecc_type="circular",
-                        m_lim=(0.013, 0.2), p_lim=(1, 8), p_resolution=100, 
+                        m_lim=(0.013, 0.2), q_lim=(0.05, 0.5), p_lim=(1, 8), p_resolution=100, 
                         save_bprp=True, verbose=True, n_jobs=-1):
     
     '''
@@ -175,6 +175,7 @@ def create_synthetic_data(object_count, catalogue,
         - period_model: a tuple (mu, sigma) for a Gaussian distribution of log(period). if None, you get a flat distribution
         - ecc_type: one of "circular", "thermal", or "turnover" to specify the eccentricity distribution
         - m_lim: tuple (m_min, m_max) specifying the allowed range of secondary masses (in solar masses)
+        - q_lim: tuple (q_min, q_max) specifying the allowed range of mass ratios (m2/m1)
         - p_lim: tuple (p_min, p_max) specifying the allowed range of log(period) (in days)
         - p_resolution: number of points to use in the period grid if period_model is specified. You don't need to change this.
         - save_bprp: whether to include the bp_rp color in the output (if available in the catalogue). Defaults to True.
@@ -189,13 +190,17 @@ def create_synthetic_data(object_count, catalogue,
     # choose which of the three eccentricity functions is called for
     ecc_func = {"circular": circular_e, "thermal": thermal_e, "turnover": turnover_e,}.get(ecc_type, circular_e)
 
+    def flat_q(count):
+        return np.random.uniform(*q_lim, count)
+    q_func = flat_q
     # if a mass ratio distribution is called for (power law), set up the function
     if mass_model is not None:
-        qs = np.linspace(0.05, 0.5, 1000)
+        qs = np.linspace(*q_lim, 1000)
         q_pdf = pexp(qs, mass_model)
         q_cdf = np.cumsum(q_pdf / np.sum(q_pdf))
         def exponential_q(count):
             return np.array([np.interp(np.random.rand(), q_cdf, qs) for _ in range(count)])   
+        q_func = exponential_q
         
     # --- select catalogue rows ---
     # weight by volume coverage
@@ -241,17 +246,11 @@ def create_synthetic_data(object_count, catalogue,
     # --- mass ratios ---
     # randomly select mass ratios, and then keep resampling
     # until they fall into the restricted range 
-    if mass_model is None:
-        q = np.random.uniform(0.05, 0.5, nb)
-    else:
-        q = exponential_q(nb)
+    q = q_func(nb)
     m2 = q * mass[bin_idx]
     bad = (m2 < m_lim[0]) | (m2 > m_lim[1])
     while np.any(bad):
-        if mass_model is None:
-            q[bad] = np.random.uniform(0.05, 0.5, bad.sum())
-        else:
-            q[bad] = exponential_q(bad.sum())
+        q[bad] = q_func(bad.sum())
         m2[bad] = q[bad] * mass[bin_idx][bad]
         bad = (m2 < m_lim[0]) | (m2 > m_lim[1])
 
