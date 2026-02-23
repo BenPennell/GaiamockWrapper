@@ -52,14 +52,14 @@ def tqdm_joblib(tqdm_object):
 # Configuration / Imports
 # =============================
 
-with open("config.json") as f:
-    d = json.load(f)
+# with open("config.json") as f:
+#     d = json.load(f)
 
-folder_a_path = os.path.abspath(os.path.join(os.getcwd(), d["wrapperlitepath"]))
-if folder_a_path not in sys.path:
-    sys.path.append(folder_a_path)
+# folder_a_path = os.path.abspath(os.path.join(os.getcwd(), d["wrapperlitepath"]))
+# if folder_a_path not in sys.path:
+#     sys.path.append(folder_a_path)
 
-import GaiamockWrapperLite as gw
+import utils.GaiamockWrapperLite as gw
 
 # =============================
 # Functions for randomly setting orbital angles
@@ -143,15 +143,13 @@ def get_gost(ra, dec):
 # =============================
 
 def solve_binary(period, q, ecc, inc, w, omega, Tp,
-                ra, dec, pmra, pmdec, plx, mass, gmag):
+                ra, dec, pmra, pmdec, plx, mass, gmag, return_fits=False):
     t = get_gost(ra, dec)
-    return gw.rapid_solution_type(
-        period, q, plx, mass,
-        gmag, 1e-10, ecc,
-        inc, w, omega, Tp,
-        ra, dec, pmra, pmdec,
-        t, c_funcs
-    )
+    return gw.rapid_solution_type(period, q, plx, mass,
+                                    gmag, 1e-10, ecc,
+                                    inc, w, omega, Tp,
+                                    ra, dec, pmra, pmdec,
+                                    t, c_funcs, return_fits=return_fits)
 
 # =============================
 # Main generator
@@ -159,7 +157,7 @@ def solve_binary(period, q, ecc, inc, w, omega, Tp,
 
 def create_synthetic_data(object_count, catalogue,
                         binary_fraction=None, binarity_model=None, mass_model=None, period_model=None, ecc_type="circular",
-                        m_lim=(0.013, 0.2), q_lim=(0.05, 0.5), p_lim=(1, 8), p_resolution=100, 
+                        m_lim=(0.013, 0.2), q_lim=(0.05, 0.5), p_lim=(1, 8), p_resolution=100, return_fits=False,
                         save_bprp=True, verbose=True, n_jobs=-1):
     
     '''
@@ -275,11 +273,9 @@ def create_synthetic_data(object_count, catalogue,
             n_jobs=n_jobs,
             backend="loky"
         )(
-            delayed(solve_binary)(
-                period[b], q[b], ecc[b], inc[b], w[b], omega[b], Tp[b],
-                ra[i], dec[i], pmra[i], pmdec[i],
-                plx[i], mass[i], gmag[i]
-            )
+            delayed(solve_binary)(period[b], q[b], ecc[b], inc[b], w[b], omega[b], Tp[b],
+                                ra[i], dec[i], pmra[i], pmdec[i],
+                                plx[i], mass[i], gmag[i], return_fits=return_fits)
             for b, i in enumerate(bin_idx)
         )
 
@@ -314,9 +310,17 @@ def create_synthetic_data(object_count, catalogue,
                 "w": w[b],
                 "omega": omega[b],
                 "Tp": Tp[b],
-                "solution_type": results[b],
             })
+            if not return_fits:
+                out["solution_type"] = results[b]
+            else:
+                if results[b] in [0,5,7,9]:
+                    out["solution_type"] = results[b]
+                else:
+                    out["solution_type"] = results[b][0]
+                    out["p0"] = results[b][1]
             b += 1
+            
 
         outdata.append(out)
 

@@ -53,7 +53,7 @@ def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, p
     
     return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit_expect*np.ones(len(Lambda_pred))
 
-def rapid_solution_type(period, q, parallax, m1, phot_g_mean_mag, f, ecc, inc, w, omega, Tp, ra, dec, pmra, pmdec, t, c_funcs, skip_full=False):
+def rapid_solution_type(period, q, parallax, m1, phot_g_mean_mag, f, ecc, inc, w, omega, Tp, ra, dec, pmra, pmdec, t, c_funcs, skip_full=False, return_fits=False):
     # COMPUTE ASTROMETRY
     t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, parallax = parallax, 
                     pmra = pmra, pmdec = pmdec, m1 = m1, m2 = q*m1, period = period, Tp = Tp*period, ecc = ecc, 
@@ -117,6 +117,8 @@ def rapid_solution_type(period, q, parallax, m1, phot_g_mean_mag, f, ecc, inc, w
     a0_over_err, parallax_over_error = a0_mas/sigma_a0_mas, plx/sig_parallax
 
     if (F2 < 25) and (a0_over_err > 158/np.sqrt(period)) and (a0_over_err > 5) and (parallax_over_error > 20000/period) and (sig_ecc < 0.079*np.log(period)-0.244):
+        if return_fits:
+            return [12, p0]
         return 12
     
     # SOLTYPE 5 - if nothing else worked
