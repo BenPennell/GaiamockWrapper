@@ -1,4 +1,4 @@
 {
     "gaiamock_path": "../BHPopulation/gaiamock",
-    "wrapper_path": "./utils"
+    "wrapper_path": "./Wrapper"
 }

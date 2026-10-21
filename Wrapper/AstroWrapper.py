@@ -29,6 +29,12 @@ ASTROMETRY_FIELDS = (
 )
 
 def generate_cfuncs():
+    """
+    Load the cached Gaia mock C callback functions.
+
+    Returns:
+        c_funcs: (object) compiled Gaia mock C-function bundle used by the astrometry routines.
+    """
     return gaiamock_mod.read_in_C_functions()
 
 
@@ -40,6 +46,23 @@ def generate_cfuncs():
 def astrometry_binary_contribution(parallax, m1, m2, period, Tp, ecc, omega, inc, w, f, t_ast_yr, psi, c_funcs):
     """
     This is the binary contribution to the observed motion as computed in predict_astrometry_luminous_binary() in gaiamock
+
+    Parameters:
+        m1: (float) primary mass in solar masses.
+        m2: (float) secondary mass in solar masses.
+        period: (float) orbital period in years.
+        Tp: (float) time of periapsis passage (0 to period) in days.
+        ecc: (float) orbital eccentricity.
+        omega: (float) argument of periapsis in radians.
+        inc: (float) orbital inclination in radians. 0 = face-on, pi/2 = edge-on.
+        w: (float) longitude of ascending node in radians.
+        f: (float) flux ratio f2/f1
+        t_ast_yr: (ndarray) observation times in years.
+        psi: (ndarray) scan angles in radians.
+        c_funcs: (object) Gaia mock C-function bundle.
+
+    Returns:
+        bias: (ndarray) binary-induced astrometric contribution to the scan-angle residuals.
     """
     
     EE = gaiamock_mod.solve_kepler_eqn_on_array(M = 2*np.pi/period * (t_ast_yr*365.25 - Tp), ecc = ecc, c_funcs = c_funcs)
@@ -61,8 +84,36 @@ def astrometry_binary_contribution(parallax, m1, m2, period, Tp, ecc, omega, inc
 def compute_astrometry(ra, dec, pmra, pmdec, parallax, phot_g_mean_mag, c_funcs, data_release="dr3", reject_10_percent=True, binary_params=None, mod=True):  
     """
     Simulate the astrometry just as in gaiamock and gaiamock_mod
+
+    Parameters:
+        ra: (float) right ascension in degrees.
+        dec: (float) declination in degrees.
+        pmra: (float) proper motion in right ascension in mas/yr.
+        pmdec: (float) proper motion in declination in mas/yr.
+        parallax: (float) parallax in mas.
+        phot_g_mean_mag: (float) Gaia G-band magnitude.
+        c_funcs: (object) Gaia mock C-function bundle.
+        data_release: (str) Gaia data release to use.
+        reject_10_percent: (bool) if True, randomly discard 10% of observations.
+        binary_params: (list or None) orbital parameters for a binary source.
+            m1: (float) primary mass in solar masses.
+            m2: (float) secondary mass in solar masses.
+            period: (float) orbital period in years.
+            Tp: (float) time of periapsis passage (0 to period) in days.
+            ecc: (float) orbital eccentricity.
+            omega: (float) argument of periapsis in radians.
+            inc: (float) orbital inclination in radians. 0 = face-on, pi/2 = edge-on.
+            w: (float) longitude of ascending node in radians.
+            f: (float) flux ratio f2/f1
+        mod: (bool) if True, use the modulated Gaia mock implementation.
+
+    Returns:
+        t_ast_yr: (ndarray) observation times in years.
+        psi: (ndarray) scan angles in radians.
+        plx_factor: (ndarray) parallax factors.
+        Lambda_pred: (ndarray) simulated along-scan astrometric measurements.
+        epoch_err_per_transit_expect: (ndarray) expected per-epoch uncertainties.
     """
-    
     # get scanning times
     if mod:
         t = gaiamock_mod.get_gost_one_position(ra, dec, data_release=data_release)
@@ -113,6 +164,16 @@ def compute_astrometry(ra, dec, pmra, pmdec, parallax, phot_g_mean_mag, c_funcs,
 def astrometry_wrapper(source_values, c_funcs, is_binary, mod=True, **kwargs):
     """
     Wrapper for compute_astrometry() so that it's easier to interface from SimulateAstrometry.simulate_population_astrometry()
+
+    Parameters:
+        source_values: (sequence) source parameters in ASTROMETRY_FIELDS order.
+        c_funcs: (object) Gaia mock C-function bundle.
+        is_binary: (bool) if True, include binary orbital terms.
+        mod: (bool) if True, use the modulated Gaia mock implementation.
+        **kwargs: (dict) extra keyword arguments passed to compute_astrometry.
+
+    Returns:
+        result: (tuple) output from compute_astrometry.
     """
     (ra, dec, pmra, pmdec, parallax, phot_g_mean_mag,
         mass, m2, period, Tp, ecc, omega, inc, w, f,) = source_values
@@ -127,6 +188,18 @@ def astrometry_wrapper(source_values, c_funcs, is_binary, mod=True, **kwargs):
 def check_ruwe(t_ast_yr, psi, plx_factor, ast_obs, ast_err, mod=True, return_fits=False):
     """
     Computes RUWE just as in gaiamock, this is directly pulled from there but modiefied for our situation
+
+    Parameters:
+        t_ast_yr: (ndarray) observation times in years.
+        psi: (ndarray) scan angles in radians.
+        plx_factor: (ndarray) parallax factors.
+        ast_obs: (ndarray) along-scan astrometric observations.
+        ast_err: (ndarray) per-epoch uncertainties.
+        mod: (bool) if True, use the modulated Gaia mock formulation.
+        return_fits: (bool) if True, also return parameter fits and uncertainties.
+
+    Returns:
+        result: (tuple or float) RUWE and, optionally, fitted parameters and uncertainties.
     """
     
     M = np.vstack([np.sin(psi), t_ast_yr*np.sin(psi), np.cos(psi), t_ast_yr*np.cos(psi), plx_factor]).T 
@@ -162,6 +235,20 @@ def check_ruwe(t_ast_yr, psi, plx_factor, ast_obs, ast_err, mod=True, return_fit
 
 ### --- ###
 def return_values(soltype, mus, sis, stats=None, return_fits=False, return_statistics=False):
+    """
+    Normalise fit-parameter outputs to a fixed-length array.
+
+    Parameters:
+        soltype: (int) solution type identifier.
+        mus: (sequence) fitted parameters.
+        sis: (sequence) parameter uncertainties.
+        stats: (dict or None) summary statistics for the fit.
+        return_fits: (bool) if True, include fitted parameters and uncertainties.
+        return_statistics: (bool) if True, include summary statistics.
+
+    Returns:
+        result: (tuple or int) solution type and optionally fit arrays/statistics.
+    """
     return_mus = np.full(12, np.nan)
     return_mus[:len(mus)] = mus
     return_sis = np.full(12, np.nan)
@@ -178,6 +265,17 @@ def return_values(soltype, mus, sis, stats=None, return_fits=False, return_stati
 def compute_ruwes(source_values, c_funcs, is_binary, mod=True, return_fits=False, **kwargs):
     """
     This computes the astrometry and then the 5p-model for the source
+
+    Parameters:
+        source_values: (sequence) source parameters in ASTROMETRY_FIELDS order.
+        c_funcs: (object) Gaia mock C-function bundle.
+        is_binary: (bool) if True, include binary orbital terms.
+        mod: (bool) if True, use the modulated Gaia mock implementation.
+        return_fits: (bool) if True, return fitted parameters and uncertainties.
+        **kwargs: (dict) extra keyword arguments passed to astrometry_wrapper.
+
+    Returns:
+        result: (tuple or float) RUWE and optionally fit parameters/uncertainties.
     """
     
     t_ast_yr, psi, plx_factor, ast_obs, ast_err = astrometry_wrapper(source_values, mod=mod, c_funcs=c_funcs, is_binary=is_binary, **kwargs)
@@ -194,19 +292,22 @@ def dr3_astrometric_pipeline(source_values, c_funcs, is_binary, skip_full=False,
     switch to base gaiamock for the higher-order solutions.
     
     This is to be run through SimulateAstrometry.simulate_population_astrometry()
-    
+
     Parameters:
-    - source_values: numeric sequence in ASTROMETRY_FIELDS order
-    - t: the observation times (in years)
-    - t_mod: the observation times for the modulated case (in years)
-    - c_funcs: the C functions for the astrometry   
-    
+        source_values: (sequence) source parameters in ASTROMETRY_FIELDS order.
+        c_funcs: (object) Gaia mock C-function bundle.
+        is_binary: (bool) if True, include binary orbital terms.
+        skip_full: (bool) if True, skip the full binary-solution checks.
+        return_fits: (bool) if True, return fitted parameters and uncertainties.
+        return_statistics: (bool) if True, return summary statistics for the best-fit model.
+        **kwargs: (dict) extra keyword arguments passed to astrometry_wrapper.
+
     Returns:
-    - soltype: the solution type (0, 5, 7, 9, 12)
-    - mu: the linear parameters (if return_fits is True), always a list of length 12
-    - sigma_mu: the uncertainties on the linear parameters (if return_fits is True), always a list of length 12
-    - summary_statistics: ruwe, and then the F2, s, parallax_over_error, sig_ecc for the 12 parameter solution if it was computed
-    Both mu, sigma_mu will be front-filled with the corresponding number of parameters for the solution type
+        - soltype: the solution type (0, 5, 7, 9, 12)
+        - mu: the linear parameters (if return_fits is True), always a list of length 12
+        - sigma_mu: the uncertainties on the linear parameters (if return_fits is True), always a list of length 12
+        - summary_statistics: ruwe, and then the F2, s, parallax_over_error, sig_ecc for the 12 parameter solution if it was computed
+        Both mu, sigma_mu will be front-filled with the corresponding number of parameters for the solution type
     """
 
     return_choices = {"return_fits": return_fits, "return_statistics": return_statistics}
@@ -305,6 +406,21 @@ def dr3_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_funcs
     - sigma_mu: the uncertainties on the linear parameters (if return_fits is True), always a list of length 12
     - summary_statistics: ruwe, and then the F2, s, parallax_over_error, sig_ecc for the 12 parameter solution if it was computed
     Both mu, sigma_mu will be front-filled with the corresponding number of parameters for the solution type
+
+    Parameters:
+        t_ast_yr: (ndarray) observation times in years.
+        psi: (ndarray) scan angles in radians.
+        plx_factor: (ndarray) parallax factors.
+        ast_obs: (ndarray) along-scan astrometric observations.
+        ast_err: (ndarray) per-epoch uncertainties.
+        c_funcs: (object) Gaia mock C-function bundle.
+        skip_full: (bool) if True, skip the full binary-solution checks.
+        return_fits: (bool) if True, return fitted parameters and uncertainties.
+        return_statistics: (bool) if True, return summary statistics.
+        period: (float or None) candidate orbital period used in the binary check.
+
+    Returns:
+        result: (tuple or int) solution type and optionally fitted parameters/statistics.
     """
 
     return_choices = {"return_fits": return_fits, "return_statistics": return_statistics}
@@ -383,6 +499,18 @@ def dr3_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_funcs
 def dr3_astrometric_pipeline_direct(source_values, c_funcs, is_binary, skip_full=False, return_fits=False, return_statistics=False, **kwargs):
     """
     Computes the astrmoetry and assigns the solution type in the DR3 regime but with only one invocation of gaiamock
+
+    Parameters:
+        source_values: (sequence) source parameters in ASTROMETRY_FIELDS order.
+        c_funcs: (object) Gaia mock C-function bundle.
+        is_binary: (bool) if True, include binary orbital terms.
+        skip_full: (bool) if True, skip the full binary-solution checks.
+        return_fits: (bool) if True, return fitted parameters and uncertainties.
+        return_statistics: (bool) if True, return summary statistics.
+        **kwargs: (dict) extra keyword arguments passed to astrometry_wrapper.
+
+    Returns:
+        result: (tuple or int) DR3 solution classification and optional fit outputs.
     """
     
     t_ast_yr, psi, plx_factor, ast_obs, ast_err = astrometry_wrapper(source_values, c_funcs=c_funcs, is_binary=is_binary, **kwargs)
@@ -394,13 +522,45 @@ def dr3_astrometric_pipeline_direct(source_values, c_funcs, is_binary, skip_full
 
 # this is temporary, to be replaced with the actual DR4 astrometric pipeline once it is available
 
-def dr4_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_funcs, return_fits=False, return_statistics=False, period=None):
+def dr4_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_funcs, return_fits=False, return_statistics=False, period=None, preliminary_checks=True):
     """
         This is the "Gaia BH3 cuts" guess, where I only fit 5 or 12 parameters.
+
+    Parameters:
+        t_ast_yr: (ndarray) observation times in years.
+        psi: (ndarray) scan angles in radians.
+        plx_factor: (ndarray) parallax factors.
+        ast_obs: (ndarray) along-scan astrometric observations.
+        ast_err: (ndarray) per-epoch uncertainties.
+        c_funcs: (object) Gaia mock C-function bundle.
+        return_fits: (bool) if True, return fitted parameters and uncertainties.
+        return_statistics: (bool) if True, return summary statistics.
+        period: (float or None) candidate orbital period used in the binary check.
+
+    Returns:
+        result: (tuple or int) DR4 solution classification with optional fit outputs.
     """  
-    res = gaiamock.fit_orbital_solution_nonlinear(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, c_funcs = c_funcs, L = np.array([10, 0, 0]))
-    ruwe = check_ruwe(t_ast_yr, psi, plx_factor, ast_obs, ast_err, return_fits=False, mod=False)
+    return_choices = {"return_fits": return_fits, "return_statistics": return_statistics}
+    ruwe, mu5, si5 = check_ruwe(t_ast_yr, psi, plx_factor, ast_obs, ast_err, return_fits=True, mod=False)
     
+    # reject obvious cases
+    if preliminary_checks:
+        # in principle all solution types are tried, but really we shouldn't look at something with like no RUWE
+        if ruwe < 1.1: 
+            return return_values(0, mu5, si5, stats={"ruwe": ruwe, "cut": "low RUWE"}, **return_choices)
+
+        # don't even bother at high P
+        if period is not None:
+            if period > 1e4: 
+                return return_values(5, mu5, si5, stats={"ruwe": ruwe, "cut": "high period"}, **return_choices)
+        
+        # if there are too few visibility periods
+        N_visibility_periods = int(np.sum( np.diff(t_ast_yr*365.25) > 4) + 1)
+        if (N_visibility_periods < 12) or (len(ast_obs) < 13): 
+                return return_values(5, mu5, si5, stats={"ruwe": ruwe, "cut": "Nobs"}, **return_choices)
+            
+    # if we get here, we need to do the full fit
+    res = gaiamock.fit_orbital_solution_nonlinear(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, c_funcs = c_funcs, L = np.array([10, 0, 0]))
     # get the linear parameters 
     period, phi_p, ecc = res
     chi2, mu_linear = gaiamock.get_astrometric_chi2(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, P = period, phi_p = phi_p, ecc = ecc, c_funcs=c_funcs)
@@ -417,15 +577,31 @@ def dr4_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_funcs
 
     soltype = 5
     # check the BH3 cuts
-    if (F2 < 25) and (a0_over_err > 158/np.sqrt(period)) and (a0_over_err > 5) and (parallax_over_error > 20000/period) and (sig_ecc < 0.079*np.log(period)-0.244):
+    if (F2 < 15) and (a0_over_err > 5) and (parallax_over_error > np.maximum(15, -208.02*np.log10(period)+548.03)) and (sig_ecc < 0.2):
         soltype = 12    
+        
+    return_p0 = p0 if soltype == 12 else mu5
+    return_errors = errors if soltype == 12 else si5
     
-    return return_values(soltype, p0, errors, stats = {"ruwe": ruwe, "F2": F2, "a0_over_err": a0_over_err, "parallax_over_error": parallax_over_error, "sig_ecc": sig_ecc}, 
-                         return_fits=return_fits, return_statistics=return_statistics)
+    return return_values(soltype, return_p0, return_errors, stats = {"ruwe": ruwe, "F2": F2, "s": a0_over_err, "parallax_over_error": parallax_over_error, "sig_ecc": sig_ecc}, **return_choices)
 
-def dr4_astrometric_pipeline(source_values, c_funcs, is_binary, mod=True, return_fits=False, return_statistics=False, **kwargs):
+def dr4_astrometric_pipeline(source_values, c_funcs, is_binary, preliminary_checks=True, mod=False, return_fits=False, return_statistics=False, data_release="dr4", **kwargs):
     """
     Computes the astrometry and assigns the solution type based on Gaia BH3 cuts
+
+    Parameters:
+        source_values: (sequence) source parameters in ASTROMETRY_FIELDS order.
+        c_funcs: (object) Gaia mock C-function bundle.
+        is_binary: (bool) if True, include binary orbital terms.
+        preliminary_checks: (bool) enables my custom speed-up checks to minimise the amount of times we do that nasty 12-parameter fit.
+        mod: (bool) if True, use the modulated Gaia mock implementation.
+        return_fits: (bool) if True, return fitted parameters and uncertainties.
+        return_statistics: (bool) if True, return summary statistics.
+        data_release: (str) Gaia data release name passed to the astrometry function.
+        **kwargs: (dict) extra keyword arguments passed to astrometry_wrapper.
+
+    Returns:
+        result: (tuple or int) DR4 solution classification with optional fit outputs.
     """
-    t_ast_yr, psi, plx_factor, ast_obs, ast_err = astrometry_wrapper(source_values, mod=mod, c_funcs=c_funcs, is_binary=is_binary, **kwargs)
-    return dr4_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_funcs, return_fits=return_fits, return_statistics=return_statistics, period=source_values[8])
+    t_ast_yr, psi, plx_factor, ast_obs, ast_err = astrometry_wrapper(source_values, mod=mod, c_funcs=c_funcs, is_binary=is_binary, data_release=data_release, **kwargs)
+    return dr4_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_funcs, preliminary_checks=preliminary_checks, return_fits=return_fits, return_statistics=return_statistics, period=source_values[8])
